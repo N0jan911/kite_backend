@@ -7,7 +7,6 @@ import { Server } from 'socket.io';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
-// Import route files
 import authRoutes from './routes/auth.js';
 import messagesRoutes from './routes/messages.js';
 import usersRoutes from './routes/users.js';
@@ -27,12 +26,10 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 5000;
 
-// ============ MIDDLEWARE ============
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -40,7 +37,6 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// ============ DATABASE ============
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
@@ -58,33 +54,27 @@ pool.query('SELECT NOW()', (err) => {
   }
 });
 
-// ============ API ROUTES ============
 app.use('/api/auth', authRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/posts', postsRoutes);
 
-// ============ HEALTH CHECK ============
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Kite backend is running' });
 });
 
-// ============ REAL-TIME SOCKET.IO ============
-const userSockets = new Map(); // Track user socket connections
+const userSockets = new Map();
 
 io.on('connection', (socket) => {
   console.log(`✅ User connected: ${socket.id}`);
 
-  // User joins their personal room
   socket.on('user_login', (userId) => {
     socket.join(`user_${userId}`);
     userSockets.set(userId, socket.id);
     console.log(`📍 User ${userId} joined room: user_${userId}`);
-    // Notify user they're online
     io.to(`user_${userId}`).emit('user_status', { status: 'online' });
   });
 
-  // Handle incoming messages in real-time
   socket.on('send_message', async (data) => {
     try {
       const { conversationId, senderId, content } = data;
@@ -94,15 +84,12 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Save to database
       const result = await pool.query(
         'INSERT INTO messages (conversation_id, sender_id, content) VALUES ($1, $2, $3) RETURNING *',
         [conversationId, senderId, content]
       );
 
       const message = result.rows[0];
-
-      // Broadcast to conversation
       io.to(`conversation_${conversationId}`).emit('new_message', message);
       socket.emit('message_sent', message);
 
@@ -113,19 +100,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // User joins conversation room
   socket.on('join_conversation', (conversationId) => {
     socket.join(`conversation_${conversationId}`);
     console.log(`📍 User joined conversation: ${conversationId}`);
   });
 
-  // User leaves conversation room
   socket.on('leave_conversation', (conversationId) => {
     socket.leave(`conversation_${conversationId}`);
     console.log(`🚪 User left conversation: ${conversationId}`);
   });
 
-  // Typing indicator
   socket.on('typing', (data) => {
     const { conversationId, userId, displayName } = data;
     io.to(`conversation_${conversationId}`).emit('user_typing', {
@@ -134,12 +118,10 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Stop typing
   socket.on('stop_typing', (conversationId) => {
     io.to(`conversation_${conversationId}`).emit('user_stopped_typing');
   });
 
-  // User comes online/offline
   socket.on('user_status', (data) => {
     const { userId, status } = data;
     io.emit('user_status_changed', { userId, status });
@@ -150,7 +132,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// ============ ERROR HANDLING ============
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(err.status || 500).json({
@@ -162,7 +143,6 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// ============ GRACEFUL SHUTDOWN ============
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully...');
   server.close(() => {
@@ -172,7 +152,6 @@ process.on('SIGTERM', () => {
   });
 });
 
-// ============ START SERVER ============
 server.listen(PORT, () => {
   console.log(`🚀 Kite backend running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
